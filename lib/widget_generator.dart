@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:code_generator/widget/widget_padding.dart';
 import 'package:code_generator/widget_type.dart';
 import '/widget/widget_info.dart';
 import '/widget/widget_layout.dart';
@@ -46,7 +47,13 @@ class MyApp extends StatelessWidget {
         body: LayoutBuilder(
           builder: (context, constraints) {
 ''');
-    _generateLayoutWidget(code, widgetInfoList, "            ", "constraints");
+    if (widgetInfoList.length == 1) {
+      _generateWidgetTree(
+          code, widgetInfoList[0], "            ", "constraints");
+    } else {
+      _generateLayoutWidget(
+          code, widgetInfoList, "            ", "constraints");
+    }
     code.write('''
           },
         ),
@@ -95,6 +102,22 @@ class MyApp extends StatelessWidget {
     return true;
   }
 
+  void _generateWidgetTree(StringBuffer code, WidgetInfo widgetInfo,
+      String indent, String constraints) {
+    _generateWidget(code, widgetInfo, indent, constraints);
+
+    if (widgetInfo.children != null && widgetInfo.children!.isNotEmpty) {
+      code.writeln("$indent  child: ");
+      if (widgetInfo.children!.length == 1) {
+        _generateWidgetTree(
+            code, widgetInfo.children![0], "$indent    ", constraints);
+      } else {
+        _generateLayoutWidget(
+            code, widgetInfo.children!, "$indent    ", constraints);
+      }
+    }
+  }
+
   void _generateWidget(StringBuffer code, WidgetInfo widgetInfo, String indent,
       String constraints) {
     switch (widgetInfo.widgetType) {
@@ -116,35 +139,36 @@ class MyApp extends StatelessWidget {
   void _generateContainer(StringBuffer code, WidgetInfo widgetInfo,
       String indent, String constraints) {
     code.write('''
-${indent}Positioned(
-${_generatePosition(widgetInfo.widgetLayout, "$indent  ", constraints)}
-$indent  child: Container(
-$indent    key: Key('${widgetInfo.key}'),
-${_generateSize(widgetInfo.widgetLayout, "$indent    ", constraints)}
-${_generateContainerDecoration(widgetInfo, "$indent    ")}
+${indent}Container(
+$indent  key: Key('${widgetInfo.key}'),
+${_generateSize(widgetInfo.widgetLayout, "$indent  ", constraints)}
+${_generateContainerDecoration(widgetInfo, "$indent  ")}
 ''');
-    if (widgetInfo.children != null && widgetInfo.children!.isNotEmpty) {
-      code.writeln("$indent    child: ");
-      _generateLayoutWidget(
-          code, widgetInfo.children!, "$indent      ", constraints);
-    }
-    code.write('''
-$indent  ),
-$indent),
-''');
-  }
 
-  String _generatePosition(
-      WidgetLayout layout, String indent, String constraints) {
-    return '''
-${indent}left: $constraints.maxWidth * ${layout.dx},
-${indent}top: $constraints.maxHeight * ${layout.dy},''';
+    if (widgetInfo.children != null && widgetInfo.children!.isNotEmpty) {
+      code.writeln("$indent  child: ");
+      if (widgetInfo.children!.length == 1) {
+        _generateWidgetTree(
+            code, widgetInfo.children![0], "$indent    ", constraints);
+      } else {
+        _generateLayoutWidget(
+            code, widgetInfo.children!, "$indent    ", constraints);
+      }
+    }
+
+    code.writeln("$indent),");
   }
 
   String _generateSize(WidgetLayout layout, String indent, String constraints) {
-    return '''
+    if (layout.isAbsoluteSize) {
+      return '''
+${indent}width: ${layout.width},
+${indent}height: ${layout.height},''';
+    } else {
+      return '''
 ${indent}width: $constraints.maxWidth * ${layout.width},
 ${indent}height: $constraints.maxHeight * ${layout.height},''';
+    }
   }
 
   String _generateContainerDecoration(WidgetInfo widgetInfo, String indent) {
@@ -156,7 +180,7 @@ $indent  color: Color.fromRGBO(${widgetInfo.widgetStyle.color!.r}, ${widgetInfo.
 $indent),
 ''');
     }
-    if (widgetInfo.widgetLayout.padding != null) {
+    if (widgetInfo.widgetLayout.padding != const WidgetPadding()) {
       decoration.write('''
 ${indent}padding: EdgeInsets.only(
 $indent  left: ${widgetInfo.widgetLayout.padding.left},
@@ -174,7 +198,28 @@ $indent),
     code.writeln("${indent}Stack(");
     code.writeln("$indent  children: [");
     for (var widgetInfo in widgetInfoList) {
-      _generateWidget(code, widgetInfo, "$indent    ", constraints);
+      code.writeln("${indent}    Positioned(");
+      code.writeln("${indent}      left: ${widgetInfo.widgetLayout.dx},");
+      code.writeln("${indent}      top: ${widgetInfo.widgetLayout.dy},");
+      code.writeln("${indent}      child: ");
+      _generateWidgetTree(code, widgetInfo, "$indent        ", constraints);
+      code.writeln("${indent}    ),");
+    }
+    code.writeln("$indent  ],");
+    code.writeln("$indent),");
+  }
+
+  void _generateRowOrColumn(StringBuffer code, List<WidgetInfo> widgetInfoList,
+      String indent, String constraints, bool isRow) {
+    code.writeln("${indent}${isRow ? 'Row' : 'Column'}(");
+    code.writeln("$indent  children: [");
+    for (var widgetInfo in widgetInfoList) {
+      if (widgetInfo.widgetLayout.isAbsoluteSize) {
+        _generateWidgetTree(code, widgetInfo, "$indent    ", constraints);
+      } else {
+        _generateFlexibleWidget(
+            code, widgetInfo, "$indent    ", constraints, isRow);
+      }
     }
     code.writeln("$indent  ],");
     code.writeln("$indent),");
@@ -182,23 +227,24 @@ $indent),
 
   void _generateRow(StringBuffer code, List<WidgetInfo> widgetInfoList,
       String indent, String constraints) {
-    code.writeln("${indent}Row(");
-    code.writeln("$indent  children: [");
-    for (var widgetInfo in widgetInfoList) {
-      _generateWidget(code, widgetInfo, "$indent    ", constraints);
-    }
-    code.writeln("$indent  ],");
-    code.writeln("$indent),");
+    _generateRowOrColumn(code, widgetInfoList, indent, constraints, true);
   }
 
   void _generateColumn(StringBuffer code, List<WidgetInfo> widgetInfoList,
       String indent, String constraints) {
-    code.writeln("${indent}Column(");
-    code.writeln("$indent  children: [");
-    for (var widgetInfo in widgetInfoList) {
-      _generateWidget(code, widgetInfo, "$indent    ", constraints);
-    }
-    code.writeln("$indent  ],");
+    _generateRowOrColumn(code, widgetInfoList, indent, constraints, false);
+  }
+
+  void _generateFlexibleWidget(StringBuffer code, WidgetInfo widgetInfo,
+      String indent, String constraints, bool isRow) {
+    double flexBasis =
+        isRow ? widgetInfo.widgetLayout.width : widgetInfo.widgetLayout.height;
+    int flex = (flexBasis * 10).round();
+
+    code.writeln("${indent}Flexible(");
+    code.writeln("$indent  flex: $flex,");
+    code.writeln("$indent  child: ");
+    _generateWidgetTree(code, widgetInfo, "$indent    ", constraints);
     code.writeln("$indent),");
   }
 
