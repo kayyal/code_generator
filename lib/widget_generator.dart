@@ -7,21 +7,26 @@ import '/widget/widget_layout.dart';
 class WidgetGenerator {
   String generateCode(String jsonInput) {
     try {
-      List<dynamic> jsonData = json.decode(jsonInput);
-      List<Map<String, dynamic>> jsonDataMaps =
-          List<Map<String, dynamic>>.from(jsonData);
-      List<WidgetInfo> widgetInfoList =
-          jsonDataMaps.map((item) => WidgetInfo.fromJson(item)).toList();
-
-      StringBuffer code = StringBuffer();
-      _generateCommonParts(code);
-      _generateWidgetClass(code, widgetInfoList);
-
-      return code.toString();
+      List<WidgetInfo> widgetInfoList = _parseJsonInput(jsonInput);
+      return _generateFullCode(widgetInfoList);
     } catch (e, stackTrace) {
       print("Error: $e\nStack trace: $stackTrace");
       return "Error generating code: $e";
     }
+  }
+
+  List<WidgetInfo> _parseJsonInput(String jsonInput) {
+    List<dynamic> jsonData = json.decode(jsonInput);
+    List<Map<String, dynamic>> jsonDataMaps =
+        List<Map<String, dynamic>>.from(jsonData);
+    return jsonDataMaps.map((item) => WidgetInfo.fromJson(item)).toList();
+  }
+
+  String _generateFullCode(List<WidgetInfo> widgetInfoList) {
+    StringBuffer code = StringBuffer();
+    _generateCommonParts(code);
+    _generateWidgetClass(code, widgetInfoList);
+    return code.toString();
   }
 
   void _generateCommonParts(StringBuffer code) {
@@ -120,19 +125,18 @@ class MyApp extends StatelessWidget {
 
   void _generateWidget(StringBuffer code, WidgetInfo widgetInfo, String indent,
       String constraints) {
-    switch (widgetInfo.widgetType) {
-      case WidgetType.container:
-        _generateContainer(code, widgetInfo, indent, constraints);
-        break;
-      case WidgetType.text:
-        _generateText(code, widgetInfo, indent, constraints);
-        break;
-      case WidgetType.button:
-        _generateButton(code, widgetInfo, indent, constraints);
-        break;
-      default:
-        code.writeln(
-            "$indent// Unsupported widget type: ${widgetInfo.widgetType}");
+    final generators = {
+      WidgetType.container: _generateContainer,
+      WidgetType.text: _generateText,
+      WidgetType.button: _generateButton,
+    };
+
+    final generator = generators[widgetInfo.widgetType];
+    if (generator != null) {
+      generator(code, widgetInfo, indent, constraints);
+    } else {
+      code.writeln(
+          "$indent// Unsupported widget type: ${widgetInfo.widgetType}");
     }
   }
 
@@ -195,18 +199,22 @@ $indent),
 
   void _generateStack(StringBuffer code, List<WidgetInfo> widgetInfoList,
       String indent, String constraints) {
-    code.writeln("${indent}Stack(");
-    code.writeln("$indent  children: [");
+    code.writeln('''${indent}Stack(
+${indent}  children: [''');
+
     for (var widgetInfo in widgetInfoList) {
-      code.writeln("${indent}    Positioned(");
-      code.writeln("${indent}      left: ${widgetInfo.widgetLayout.dx},");
-      code.writeln("${indent}      top: ${widgetInfo.widgetLayout.dy},");
-      code.writeln("${indent}      child: ");
+      code.writeln('''${indent}    Positioned(
+${indent}      left: ${widgetInfo.widgetLayout.dx},
+${indent}      top: ${widgetInfo.widgetLayout.dy},
+${indent}      child: ''');
+
       _generateWidgetTree(code, widgetInfo, "$indent        ", constraints);
-      code.writeln("${indent}    ),");
+
+      code.writeln('''${indent}    ),''');
     }
-    code.writeln("$indent  ],");
-    code.writeln("$indent),");
+
+    code.writeln('''${indent}  ],
+${indent}),''');
   }
 
   void _generateRowOrColumn(StringBuffer code, List<WidgetInfo> widgetInfoList,
@@ -235,17 +243,43 @@ $indent),
     _generateRowOrColumn(code, widgetInfoList, indent, constraints, false);
   }
 
-  void _generateFlexibleWidget(StringBuffer code, WidgetInfo widgetInfo,
-      String indent, String constraints, bool isRow) {
-    double flexBasis =
-        isRow ? widgetInfo.widgetLayout.width : widgetInfo.widgetLayout.height;
-    int flex = (flexBasis * 10).round();
+  void _generateFlexibleWidget(
+    StringBuffer code,
+    WidgetInfo widgetInfo,
+    String indent,
+    String constraints,
+    bool isRow, {
+    int maxFlex = 10,
+    bool useExpanded = false,
+  }) {
+    double flexBasis = _calculateFlexBasis(widgetInfo, isRow);
+    int flex = _calculateFlex(flexBasis, maxFlex);
 
-    code.writeln("${indent}Flexible(");
-    code.writeln("$indent  flex: $flex,");
-    code.writeln("$indent  child: ");
-    _generateWidgetTree(code, widgetInfo, "$indent    ", constraints);
-    code.writeln("$indent),");
+    String widget = useExpanded ? 'Expanded' : 'Flexible';
+
+    code.writeln('$indent$widget(');
+
+    if (!useExpanded) {
+      code.writeln('$indent  flex: $flex,');
+    }
+
+    if (widgetInfo.widgetLayout.isAbsoluteSize) {
+      code.writeln('$indent  fit: FlexFit.loose,');
+    }
+
+    code.writeln('$indent  child: ');
+    _generateWidgetTree(code, widgetInfo, '$indent    ', constraints);
+    code.writeln('$indent),');
+  }
+
+  double _calculateFlexBasis(WidgetInfo widgetInfo, bool isRow) {
+    return isRow
+        ? widgetInfo.widgetLayout.width
+        : widgetInfo.widgetLayout.height;
+  }
+
+  int _calculateFlex(double flexBasis, int maxFlex) {
+    return (flexBasis * maxFlex).round().clamp(1, maxFlex);
   }
 
   void _generateText(StringBuffer code, WidgetInfo widgetInfo, String indent,
